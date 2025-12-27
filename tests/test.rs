@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use bitcoinkernel::verify::PrecomputedTransactionData;
     use bitcoinkernel::{
         prelude::*, verify, Block, BlockHash, BlockSpentOutputs, BlockTreeEntry,
         BlockValidationStateRef, ChainParams, ChainType, ChainstateManager,
@@ -290,6 +291,8 @@ mod tests {
         let tx_hex = "02000000013f7cebd65c27431a90bba7f796914fe8cc2ddfc3f2cbd6f7e5f2fc854534da95000000006b483045022100de1ac3bcdfb0332207c4a91f3832bd2c2915840165f876ab47c5f8996b971c3602201c6c053d750fadde599e6f5c4e1963df0f01fc0d97815e8157e3d59fe09ca30d012103699b464d1d8bc9e47d4fb1cdaa89a1c5783d68363c4dbc4b524ed3d857148617feffffff02836d3c01000000001976a914fc25d6d5c94003bf5b0c7b640a248e2c637fcfb088ac7ada8202000000001976a914fbed3d9b11183209a57999d54d59f67c019e756c88ac6acb0700";
         let tx = Transaction::new(hex::decode(tx_hex).unwrap().as_slice()).unwrap();
         let dummy_output = TxOut::new(&script_pubkey, 100000);
+        let tx_data =
+            PrecomputedTransactionData::new(&tx, std::slice::from_ref(&dummy_output)).unwrap();
 
         // tx_index out of bounds
         let result = verify(
@@ -298,7 +301,7 @@ mod tests {
             &tx,
             999,
             Some(VERIFY_ALL_PRE_TAPROOT),
-            std::slice::from_ref(&dummy_output),
+            &tx_data,
         );
         assert!(matches!(
             result,
@@ -306,32 +309,13 @@ mod tests {
         ));
 
         let wrong_spent_outputs = vec![dummy_output.clone(), dummy_output.clone()];
-
-        // two transaction outputs for one input
-        let result = verify(
-            &script_pubkey,
-            Some(0),
-            &tx,
-            0,
-            Some(VERIFY_ALL_PRE_TAPROOT),
-            &wrong_spent_outputs,
-        );
         assert!(matches!(
-            result,
-            Err(KernelError::ScriptVerify(
-                ScriptVerifyError::SpentOutputsMismatch
-            ))
+            PrecomputedTransactionData::new(&tx, &wrong_spent_outputs),
+            Err(KernelError::MismatchedOutputsSize)
         ));
 
         // Test Invalid flags
-        let result = verify(
-            &script_pubkey,
-            Some(0),
-            &tx,
-            0,
-            Some(0xFFFFFFFF),
-            std::slice::from_ref(&dummy_output),
-        );
+        let result = verify(&script_pubkey, Some(0), &tx, 0, Some(0xFFFFFFFF), &tx_data);
         assert!(matches!(
             result,
             Err(KernelError::ScriptVerify(ScriptVerifyError::InvalidFlags))
@@ -344,7 +328,7 @@ mod tests {
             &tx,
             0,
             Some(VERIFY_WITNESS),
-            std::slice::from_ref(&dummy_output),
+            &tx_data,
         );
         assert!(matches!(
             result,
@@ -354,13 +338,14 @@ mod tests {
         ));
 
         // Test Spent outputs required
+        let tx_data_invalid = PrecomputedTransactionData::new(&tx, &Vec::<TxOut>::new()).unwrap();
         let result = verify(
             &script_pubkey,
             Some(0),
             &tx,
             0,
             Some(VERIFY_TAPROOT),
-            &Vec::<TxOut>::new(),
+            &tx_data_invalid,
         );
         assert!(matches!(
             result,
@@ -569,13 +554,14 @@ mod tests {
         let spent_script_pubkey =
             ScriptPubkey::try_from(hex::decode(spent).unwrap().as_slice()).unwrap();
         let spending_tx = Transaction::new(hex::decode(spending).unwrap().as_slice()).unwrap();
+        let tx_data = PrecomputedTransactionData::new(&spending_tx, &outputs).unwrap();
         verify(
             &spent_script_pubkey,
             Some(amount),
             &spending_tx,
             input,
             Some(VERIFY_ALL_PRE_TAPROOT),
-            &outputs,
+            &tx_data,
         )?;
         Ok(())
     }
