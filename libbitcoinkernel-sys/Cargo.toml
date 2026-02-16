@@ -51,5 +51,6 @@ exclude = [
 publish = true
 
 [build-dependencies]
+cmake = "0.1"
 cc = "1.2"
 bindgen = "0.72"

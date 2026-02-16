@@ -2,82 +2,49 @@ use bindgen::RustEdition;
 use std::env;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::Command;
 
 fn main() {
     let bitcoin_dir = Path::new("bitcoin");
-    let out_dir = env::var("OUT_DIR").unwrap();
-    let build_dir = Path::new(&out_dir).join("bitcoin");
-    let install_dir = Path::new(&out_dir).join("install");
-
-    println!("{} {}", bitcoin_dir.display(), build_dir.display());
 
     // Iterate through all files in the Bitcoin Core submodule directory
     println!("cargo:rerun-if-changed={}", bitcoin_dir.display());
 
     let build_config = "RelWithDebInfo";
 
-    Command::new("cmake")
-        .arg("-B")
-        .arg(&build_dir)
-        .arg("-S")
-        .arg(bitcoin_dir)
-        .arg(format!("-DCMAKE_BUILD_TYPE={build_config}"))
-        .arg("-DBUILD_KERNEL_LIB=ON")
-        .arg("-DBUILD_TESTS=OFF")
-        .arg("-DBUILD_BENCH=OFF")
-        .arg("-DBUILD_KERNEL_TEST=OFF")
-        .arg("-DBUILD_TX=OFF")
-        .arg("-DBUILD_WALLET_TOOL=OFF")
-        .arg("-DENABLE_WALLET=OFF")
-        .arg("-DENABLE_EXTERNAL_SIGNER=OFF")
-        .arg("-DBUILD_UTIL=OFF")
-        .arg("-DBUILD_BITCOIN_BIN=OFF")
-        .arg("-DBUILD_DAEMON=OFF")
-        .arg("-DBUILD_UTIL_CHAINSTATE=OFF")
-        .arg("-DBUILD_CLI=OFF")
-        .arg("-DBUILD_FUZZ_BINARY=OFF")
-        .arg("-DBUILD_SHARED_LIBS=OFF")
-        .arg("-DCMAKE_INSTALL_LIBDIR=lib")
-        .arg("-DENABLE_IPC=OFF")
-        .arg(format!("-DCMAKE_INSTALL_PREFIX={}", install_dir.display()))
-        .status()
-        .unwrap();
-
-    let num_jobs = env::var("NUM_JOBS")
-        .ok()
-        .and_then(|v| v.parse::<u32>().ok())
-        .unwrap_or(1); // Default to 1 if not set
-
-    Command::new("cmake")
-        .arg("--build")
-        .arg(&build_dir)
-        .arg("--config")
-        .arg(build_config)
-        .arg(format!("--parallel={num_jobs}"))
-        .status()
-        .unwrap();
-
-    Command::new("cmake")
-        .arg("--install")
-        .arg(&build_dir)
-        .arg("--config")
-        .arg(build_config)
-        .status()
-        .unwrap();
+    let output_dir = cmake::Config::new("bitcoin")
+        .profile(build_config)
+        .define("BUILD_KERNEL_LIB", "ON")
+        .define("BUILD_TESTS", "OFF")
+        .define("BUILD_BENCH", "OFF")
+        .define("BUILD_KERNEL_TEST", "OFF")
+        .define("BUILD_TX", "OFF")
+        .define("BUILD_WALLET_TOOL", "OFF")
+        .define("ENABLE_WALLET", "OFF")
+        .define("ENABLE_EXTERNAL_SIGNER", "OFF")
+        .define("BUILD_UTIL", "OFF")
+        .define("BUILD_BITCOIN_BIN", "OFF")
+        .define("BUILD_DAEMON", "OFF")
+        .define("BUILD_UTIL_CHAINSTATE", "OFF")
+        .define("BUILD_CLI", "OFF")
+        .define("BUILD_FUZZ_BINARY", "OFF")
+        .define("BUILD_SHARED_LIBS", "OFF")
+        .define("CMAKE_INSTALL_LIBDIR", "lib")
+        .define("ENABLE_IPC", "OFF")
+        .build();
 
     // Check if the build system used a multi-config generator
-    let lib_dir = if install_dir.join("lib").join(build_config).exists() {
-        install_dir.join("lib").join(build_config)
+    let lib_dir = if output_dir.join("lib").join(build_config).exists() {
+        output_dir.join("lib").join(build_config)
     } else {
-        install_dir.join("lib")
+        output_dir.join("lib")
     };
+
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
 
     println!("cargo:rustc-link-lib=static=bitcoinkernel");
 
     // Header path for bindgen
-    let include_path = install_dir.join("include");
+    let include_path = output_dir.join("include");
     let header = include_path.join("bitcoinkernel.h");
 
     #[allow(deprecated)]
