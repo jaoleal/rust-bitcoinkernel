@@ -13,6 +13,15 @@ fn main() {
 
     let output_dir = cmake::Config::new("bitcoin")
         .profile(build_config)
+        .no_default_flags(true)
+        // Prevent the cmake crate from injecting cc-derived compiler flags
+        // (e.g. /MD on MSVC) that conflict with Bitcoin Core's own CMakeLists.txt
+        // flag management. Defining these prevents the cmake crate from
+        // overriding them, and Bitcoin Core's build system manages all
+        // necessary compiler flags itself via target_compile_options.
+        .define("CMAKE_C_FLAGS", "")
+        .define("CMAKE_CXX_FLAGS", "")
+        .define("CMAKE_ASM_FLAGS", "")
         .define("BUILD_KERNEL_LIB", "ON")
         .define("BUILD_TESTS", "OFF")
         .define("BUILD_BENCH", "OFF")
