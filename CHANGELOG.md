@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added Nix package outputs for Android with bundled NDK r24, Rust toolchains, Boost, and cmake.
 - Added `Block::check` to perform context-free validation of a block (size, weight, coinbase, transactions, sigops), with optional proof-of-work and merkle-root checks toggled via the `BLOCK_CHECK_BASE` / `_POW` / `_MERKLE` / `_ALL` flags. Returns a `BlockCheckResult` enum carrying the validation state on failure.
 - Implemented `Debug` for `BlockValidationResult`, `BlockValidationStateRef`, `ProcessBlockHeaderresult` and `BlockCheckResult`, enabling inspection via `{:?}` in logs and test output.
 - Added `#[must_use]` to `BlockCheckResult` and `ProcessBlockHeaderResult` to warn when validation results are silently ignored.
@@ -19,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.1] 2026-05-20
 
 ### Added
+a
 - Added `BlockTreeEntry::ancestor` to look up an ancestor block at a given height. Returns `None` if the height is out of range. This operation is O(log N).
 - Added `Transaction::locktime()` to retrieve a transaction's `nLockTime` value as a `u32`.
 - Added `TxIn::sequence()` to retrieve an input's `nSequence` value as a `u32`.

@@ -25,9 +25,10 @@
         };
 
         rustVersion = "1.71.0";
+        rustToolchainSha256 = "sha256-ks0nMEGGXKrHnfv4Fku+vhQ7gx76ruv6Ij4fKZR3l78=";
         rustToolchain = fenix.packages.${system}.fromToolchainName {
           name = rustVersion;
-          sha256 = "sha256-ks0nMEGGXKrHnfv4Fku+vhQ7gx76ruv6Ij4fKZR3l78=";
+          sha256 = rustToolchainSha256;
         };
         rustBuildToolchain = fenix.packages.${system}.combine [
           rustToolchain.rustc
@@ -85,6 +86,86 @@
             pkgs.gcc.cc.lib
           ];
         };
+
+        packages =
+          # Android build infrastructure (unfree NDK + SDK).
+          let
+            ndkVersion = "27.2.12479018"; # which NDK release to download
+            lockfile = ./Cargo-minimal.lock;
+            ANDROID_API_LEVEL = "24";
+            crateVersion =
+              (builtins.fromTOML (builtins.readFile ./libbitcoinkernel-sys/Cargo.toml)).package.version;
+
+            androidPkgs = import nixpkgs {
+              inherit system;
+              config.android_sdk.accept_license = true;
+              config.allowUnfree = true;
+            };
+            androidComposition = androidPkgs.androidenv.composeAndroidPackages {
+              # platformVersions is the SDK tooling version, not the minimum API level.
+              # The NDK target floor is set via ANDROID_API_LEVEL in build.rs (default 24).
+              platformVersions = [ "34" ];
+              ndkVersions = [ ndkVersion ];
+              includeNDK = true;
+            };
+            androidSdk = androidComposition.androidsdk;
+            androidNdk = "${androidSdk}/libexec/android-sdk/ndk/${ndkVersion}";
+
+            mkAndroidPackage =
+              rustTarget:
+              let
+                rustTargetToolchain = fenix.packages.${system}.combine [
+                  rustToolchain.rustc
+                  rustToolchain.cargo
+                  rustToolchain.rust-src
+                  rustToolchain.rust-std
+                  (fenix.packages.${system}.targets.${rustTarget}.fromToolchainName {
+                    name = rustVersion;
+                    sha256 = rustToolchainSha256;
+                  }).rust-std
+                ];
+                rustPlatform = androidPkgs.makeRustPlatform {
+                  cargo = rustTargetToolchain;
+                  rustc = rustTargetToolchain;
+                };
+              in
+              rustPlatform.buildRustPackage {
+                pname = "libbitcoinkernel-${rustTarget}";
+                version = crateVersion;
+                src = ./.;
+                cargoLock.lockFile = lockfile;
+                postPatch = ''
+                  cp ${lockfile} Cargo.lock
+                '';
+                nativeBuildInputs = [
+                  androidPkgs.cmake
+                  androidPkgs.boost.dev
+                  androidSdk
+                ];
+
+                ANDROID_HOME = "${androidSdk}/libexec/android-sdk";
+                ANDROID_NDK_HOME = androidNdk;
+                CMAKE_PREFIX_PATH = "${androidPkgs.boost.dev}";
+
+                # cargoBuildHook hardcodes the host --target at
+                # derivation time, so we bypass it for cross builds.
+                dontCargoBuild = true;
+                doCheck = false;
+                buildPhase = "cargo build -p libbitcoinkernel-sys --target ${rustTarget} --offline --release";
+                installPhase = ''
+                  mkdir -p $out/lib $out/include
+                  find target/${rustTarget}/release -path "*/out/install/lib/*.a" \
+                  -exec cp {} $out/lib/ \;
+                  find target/${rustTarget}/release -path "*/out/install/include/*" \
+                  -exec cp {} $out/include/ \;'';
+              };
+          in
+          {
+            android-aarch64 = mkAndroidPackage "aarch64-linux-android";
+            android-armv7 = mkAndroidPackage "armv7-linux-androideabi";
+            android-x86_64 = mkAndroidPackage "x86_64-linux-android";
+            # i686 omitted: not a current target
+          };
       }
     );
 }

@@ -34,6 +34,23 @@ dependencies. Once setup, run:
 cargo b
 ```
 
+### Android Cross-Compilation
+
+Android cross-compilation requires [Nix](https://nixos.org/).
+
+Nix handles the exact NDK version, Rust toolchains, Boost, and cmake
+automatically, giving you a reproducible build environment with no manual setup.
+
+```bash
+nix build .#android-aarch64
+nix build .#android-armv7
+nix build .#android-x86_64
+```
+
+The resulting libraries are placed in `result/lib/`.
+
+Output targets Android API 24+ (Nougat) minimum.
+
 ## MSRV (Minimum Supported Rust Version)
 
 The minimum supported Rust version is 1.71. Users on rustc older than
