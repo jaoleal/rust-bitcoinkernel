@@ -20,7 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.1] 2026-05-20
 
 ### Added
-a
 - Added `BlockTreeEntry::ancestor` to look up an ancestor block at a given height. Returns `None` if the height is out of range. This operation is O(log N).
 - Added `Transaction::locktime()` to retrieve a transaction's `nLockTime` value as a `u32`.
 - Added `TxIn::sequence()` to retrieve an input's `nSequence` value as a `u32`.

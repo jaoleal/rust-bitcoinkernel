@@ -218,6 +218,26 @@ jobs:
     - name: Build and test
       run: cargo test -vv
 
+
+  android-cross-compile:
+    name: Cross-Compile for Android (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - android-aarch64
+          - android-armv7
+          - android-x86_64
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v31
+
+    - name: Build
+      run: nix build .#${{ matrix.package }} -L
+
   fuzz-corpus:
     name: Verify Fuzz Corpus
     runs-on: ubuntu-latest
