@@ -2,6 +2,34 @@ use std::env;
 use std::path::Path;
 use std::process::Command;
 
+// Rust target triple -> NDK ABI name.
+fn android_abi(target: &str) -> &'static str {
+    match target {
+        t if t.contains("aarch64") => "arm64-v8a",
+        t if t.contains("armv7") => "armeabi-v7a",
+        t if t.contains("x86_64") => "x86_64",
+        _ => panic!("Unsupported Android ABI: {target}"),
+    }
+}
+
+// Rust target triple -> NDK sysroot lib directory triple.
+// armv7 differs: Rust says `armv7-linux-androideabi`, NDK says `arm-linux-androideabi`.
+fn android_sysroot_triple(target: &str) -> &str {
+    if target.starts_with("armv7") {
+        "arm-linux-androideabi"
+    } else {
+        target
+    }
+}
+
+fn android_host_tag() -> &'static str {
+    match std::env::consts::OS {
+        "macos" => "darwin-x86_64",
+        "linux" => "linux-x86_64",
+        os => panic!("unsupported build host for Android cross-compilation: {os}"),
+    }
+}
+
 fn main() {
     let bitcoin_dir = Path::new("bitcoin");
     let out_dir = env::var("OUT_DIR").unwrap();
@@ -15,7 +43,8 @@ fn main() {
 
     let build_config = "RelWithDebInfo";
 
-    Command::new("cmake")
+    let mut cmake_configure = Command::new("cmake");
+    cmake_configure
         .arg("-B")
         .arg(&build_dir)
         .arg("-S")
@@ -38,7 +67,53 @@ fn main() {
         .arg("-DBUILD_SHARED_LIBS=OFF")
         .arg("-DCMAKE_INSTALL_LIBDIR=lib")
         .arg("-DENABLE_IPC=OFF")
-        .arg(format!("-DCMAKE_INSTALL_PREFIX={}", install_dir.display()))
+        .arg(format!("-DCMAKE_INSTALL_PREFIX={}", install_dir.display()));
+
+    let target = env::var("TARGET").unwrap();
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
+    let is_android = target_os == "android";
+
+    let ndk = if is_android {
+        Some(
+            env::var("ANDROID_NDK_HOME")
+                .expect("Android target detected but ANDROID_NDK_HOME is not set"),
+        )
+    } else {
+        None
+    };
+
+    if is_android {
+        let ndk = ndk.as_deref().unwrap();
+        let toolchain_file = format!("{ndk}/build/cmake/android.toolchain.cmake");
+
+        let abi = android_abi(&target);
+
+        // API level 24+ is required because Bitcoin Core uses getifaddrs
+        // which was introduced in Android API 24 (Nougat).
+        //
+        // This can be overridden to a higher level by setting ANDROID_API_LEVEL.
+        let api_level = match env::var("ANDROID_API_LEVEL") {
+            Ok(level) => {
+                let n: u32 = level.parse().expect("ANDROID_API_LEVEL must be a number");
+                assert!(n >= 24, "ANDROID_API_LEVEL must be 24+");
+                level
+            }
+            _ => "24".to_string(),
+        };
+
+        cmake_configure
+            .arg(format!("-DCMAKE_TOOLCHAIN_FILE={toolchain_file}"))
+            .arg(format!("-DANDROID_ABI={abi}"))
+            .arg(format!("-DANDROID_PLATFORM=android-{api_level}"))
+            .arg("-DCMAKE_SYSTEM_NAME=Android")
+            .arg(format!("-DCMAKE_ANDROID_NDK={ndk}"))
+            // The Android NDK toolchain sets CMAKE_FIND_ROOT_PATH_MODE_PACKAGE
+            // to ONLY, which prevents cmake from finding host packages via
+            // CMAKE_PREFIX_PATH. Override it so Boost headers can be located.
+            .arg("-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH");
+    }
+
+    cmake_configure
         .status()
         .expect("cmake should be installed and available in PATH");
 
@@ -70,19 +145,35 @@ fn main() {
     } else {
         install_dir.join("lib")
     };
+
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
 
     println!("cargo:rustc-link-lib=static=bitcoinkernel");
 
     let compiler = cc::Build::new().get_compiler();
-    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
 
     if target_os == "windows" {
         println!("cargo:rustc-link-lib=bcrypt");
         println!("cargo:rustc-link-lib=shell32");
-    }
+    } else if is_android {
+        // Without these, changing either variable between builds won't trigger a rebuild,
+        // so we could silently end up with a stale binary built against the wrong NDK or API level.
+        println!("cargo:rerun-if-env-changed=ANDROID_NDK_HOME");
+        println!("cargo:rerun-if-env-changed=ANDROID_API_LEVEL");
+        // Android NDK ships libc++_static.a and libc++abi.a in the
+        // per-architecture sysroot directory (not the API-level subdirectory).
+        let ndk = ndk.as_deref().unwrap();
 
-    if compiler.is_like_clang() {
+        let ndk_triple = android_sysroot_triple(&target);
+
+        let host_tag = android_host_tag();
+
+        let ndk_lib_dir =
+            format!("{ndk}/toolchains/llvm/prebuilt/{host_tag}/sysroot/usr/lib/{ndk_triple}");
+        println!("cargo:rustc-link-search=native={ndk_lib_dir}");
+        println!("cargo:rustc-link-lib=static=c++_static");
+        println!("cargo:rustc-link-lib=static=c++abi");
+    } else if compiler.is_like_clang() {
         if target_os == "macos" {
             println!("cargo:rustc-link-lib=dylib=c++");
         } else {
