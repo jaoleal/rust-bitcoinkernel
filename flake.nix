@@ -111,9 +111,20 @@
             androidSdk = androidComposition.androidsdk;
             androidNdk = "${androidSdk}/libexec/android-sdk/ndk/${ndkVersion}";
 
+            runTests = system == "x86_64-linux";
+
+            # x86_64-linux-android is excluded from tests: Rust 1.71's
+            # compiler_builtins lacks the f128 routines (__eqtf2, __multf3, …)
+            # that bionic's static libc.a requires on x86_64.
+            testableTargets = [
+              "aarch64-linux-android"
+              "armv7-linux-androideabi"
+            ];
+
             mkAndroidPackage =
               rustTarget:
               let
+                canTest = runTests && builtins.elem rustTarget testableTargets;
                 rustTargetToolchain = fenix.packages.${system}.combine [
                   rustToolchain.rustc
                   rustToolchain.cargo
@@ -128,6 +139,23 @@
                   cargo = rustTargetToolchain;
                   rustc = rustTargetToolchain;
                 };
+                qemuBin =
+                  if builtins.match "aarch64.*" rustTarget != null then
+                    "qemu-aarch64"
+                  else if builtins.match "armv7.*" rustTarget != null then
+                    "qemu-arm"
+                  else
+                    throw "Unsupported Android target: ${rustTarget}";
+                # NDK clang wrapper triple: armv7 uses "armv7a-linux-androideabi",
+                # all others match the Rust target triple.
+                ndkClangTriple =
+                  if builtins.match "armv7.*" rustTarget != null then "armv7a-linux-androideabi" else rustTarget;
+                ndkLinker = "${androidNdk}/toolchains/llvm/prebuilt/linux-x86_64/bin/${ndkClangTriple}${ANDROID_API_LEVEL}-clang";
+                cargoTargetPrefix = "CARGO_TARGET_${
+                  builtins.replaceStrings [ "-" ] [ "_" ] (pkgs.lib.toUpper rustTarget)
+                }";
+                cargoRunnerEnvVar = "${cargoTargetPrefix}_RUNNER";
+                cargoLinkerEnvVar = "${cargoTargetPrefix}_LINKER";
               in
               rustPlatform.buildRustPackage {
                 pname = "libbitcoinkernel-${rustTarget}";
@@ -141,6 +169,9 @@
                   androidPkgs.cmake
                   androidPkgs.boost.dev
                   androidSdk
+                ]
+                ++ pkgs.lib.optionals canTest [
+                  pkgs.qemu
                 ];
 
                 ANDROID_HOME = "${androidSdk}/libexec/android-sdk";
@@ -150,14 +181,24 @@
                 # cargoBuildHook hardcodes the host --target at
                 # derivation time, so we bypass it for cross builds.
                 dontCargoBuild = true;
-                doCheck = false;
-                buildPhase = "cargo build -p libbitcoinkernel-sys --target ${rustTarget} --offline --release";
+                doCheck = canTest;
+                buildPhase = ''
+                  cargo build -p libbitcoinkernel-sys --target ${rustTarget} --offline --release
+                '';
+                checkPhase = pkgs.lib.optionalString canTest ''
+                  export ${cargoLinkerEnvVar}=${ndkLinker}
+                  export ${cargoRunnerEnvVar}=${pkgs.qemu}/bin/${qemuBin}
+                  export QEMU_LD_PREFIX=${androidNdk}/toolchains/llvm/prebuilt/linux-x86_64/sysroot
+                  export RUSTFLAGS="-C target-feature=+crt-static"
+                  cargo test --target ${rustTarget} --offline --release --verbose
+                '';
                 installPhase = ''
                   mkdir -p $out/lib $out/include
                   find target/${rustTarget}/release -path "*/out/install/lib/*.a" \
-                  -exec cp {} $out/lib/ \;
+                    -exec cp {} $out/lib/ \;
                   find target/${rustTarget}/release -path "*/out/install/include/*" \
-                  -exec cp {} $out/include/ \;'';
+                    -exec cp {} $out/include/ \;
+                '';
               };
           in
           {
