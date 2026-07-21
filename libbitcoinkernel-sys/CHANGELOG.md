@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- New `LIBBITCOINKERNEL_LIB_DIR` option on build.rs that skips building process in order of a prebuilt libbitcoinkernel.
 - New `btck_TxValidationState` opaque type for holding transaction validation state
 - New `btck_TxValidationResult` type with named constants for all transaction validation result variants
 - New `btck_tx_validation_state_create`, `btck_tx_validation_state_get_validation_mode`, `btck_tx_validation_state_get_tx_validation_result` and `btck_tx_validation_state_destroy` for managing and inspecting transaction validation state

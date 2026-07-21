@@ -34,6 +34,17 @@ dependencies. Once setup, run:
 cargo b
 ```
 
+### Using a pre-built `libbitcoinkernel`
+
+If you have a pre-built `libbitcoinkernel.a`, you can skip the CMake build
+step entirely by pointing `LIBBITCOINKERNEL_LIB_DIR` to the directory
+containing it:
+
+```bash
+export LIBBITCOINKERNEL_LIB_DIR=/path/to/lib
+cargo build
+```
+
 ## MSRV (Minimum Supported Rust Version)
 
 The minimum supported Rust version is 1.71. Users on rustc older than
