@@ -85,10 +85,7 @@ fn target_config() -> TargetConfig {
         "android" => Android::from_env().config(),
 
         "linux" | "freebsd" | "openbsd" | "netbsd" | "dragonfly" | "illumos" | "solaris" => {
-            TargetConfig {
-                link_directives: cxx_runtime("stdc++"),
-                ..Default::default()
-            }
+            GenericUnix::from_env().config()
         }
 
         other => panic!(
@@ -109,7 +106,82 @@ fn cxx_runtime(clang_lib: &str) -> Vec<String> {
         return Vec::new();
     };
 
-    vec![format!("rustc-link-lib=dylib={lib}")]
+    // With crt-static (e.g. fully static musl builds) there is no dynamic
+    // C++ runtime to link against; ask for the static archive instead.
+    let kind = if env::var("CARGO_CFG_TARGET_FEATURE")
+        .is_ok_and(|features| features.split(',').any(|f| f == "crt-static"))
+    {
+        "static"
+    } else {
+        "dylib"
+    };
+
+    vec![format!("rustc-link-lib={kind}={lib}")]
+}
+
+// Non-Android unix-like targets. Native builds need no extra cmake flags.
+// Cross builds are configured either by an external toolchain file (CMake
+// 3.21+ honors the `CMAKE_TOOLCHAIN_FILE` environment variable on its own)
+// or, absent one, by synthesizing the minimal cross settings from what
+// cargo and the `cc` crate already know.
+struct GenericUnix {
+    os: String,
+}
+
+impl GenericUnix {
+    fn from_env() -> Self {
+        Self {
+            os: env::var("CARGO_CFG_TARGET_OS").unwrap(),
+        }
+    }
+
+    fn is_cross() -> bool {
+        env::var("HOST").unwrap() != env::var("TARGET").unwrap()
+    }
+
+    // Value for `-DCMAKE_SYSTEM_NAME`.
+    fn cmake_system_name(&self) -> &'static str {
+        match &*self.os {
+            "linux" => "Linux",
+            "freebsd" => "FreeBSD",
+            "openbsd" => "OpenBSD",
+            "netbsd" => "NetBSD",
+            "dragonfly" => "DragonFly",
+            "illumos" | "solaris" => "SunOS",
+            os => panic!("no CMAKE_SYSTEM_NAME mapping for target OS: {os}"),
+        }
+    }
+
+    fn config(&self) -> TargetConfig {
+        let mut cmake_args = Vec::new();
+
+        if Self::is_cross() && env::var("CMAKE_TOOLCHAIN_FILE").is_err() {
+            let cc = cc::Build::new().get_compiler();
+            let cxx = cc::Build::new().cpp(true).get_compiler();
+
+            cmake_args = vec![
+                format!("-DCMAKE_SYSTEM_NAME={}", self.cmake_system_name()),
+                format!(
+                    "-DCMAKE_SYSTEM_PROCESSOR={}",
+                    env::var("CARGO_CFG_TARGET_ARCH").unwrap()
+                ),
+                format!("-DCMAKE_C_COMPILER={}", cc.path().display()),
+                format!("-DCMAKE_CXX_COMPILER={}", cxx.path().display()),
+            ];
+        }
+
+        TargetConfig {
+            cmake_args,
+            link_directives: cxx_runtime("stdc++"),
+            rerun_env: &[
+                "CMAKE_TOOLCHAIN_FILE",
+                "CC",
+                "CXX",
+                "TARGET_CC",
+                "TARGET_CXX",
+            ],
+        }
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
